@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 //
 
+#include <netdb.h>
 #include <srs_app_gb28181.hpp>
 
 #include <srs_app_config.hpp>
@@ -400,11 +401,12 @@ std::string SrsLazyGbSession::desc()
     return "GBS";
 }
 
-SrsGbListener::SrsGbListener()
-{
+SrsGbListener::SrsGbListener() {
     conf_ = NULL;
     sip_listener_ = new SrsTcpListener(this);
     media_listener_ = new SrsTcpListener(this);
+
+    sip_udp_listener_ = new SrsUdpListener(this);
 }
 
 SrsGbListener::~SrsGbListener()
@@ -435,6 +437,8 @@ srs_error_t SrsGbListener::initialize(SrsConfDirective* conf)
     int port = _srs_config->get_stream_caster_sip_listen(conf);
     sip_listener_->set_endpoint(ip, port)->set_label("SIP-TCP");
 
+    sip_udp_listener_->set_endpoint(ip, port)->set_label("SIP-UDP");
+
     return err;
 }
 
@@ -447,6 +451,10 @@ srs_error_t SrsGbListener::listen()
     }
 
     if ((err = sip_listener_->listen()) != srs_success) {
+        return srs_error_wrap(err, "listen");
+    }
+
+    if ((err = sip_udp_listener_->listen()) != srs_success) {
         return srs_error_wrap(err, "listen");
     }
 
@@ -490,6 +498,20 @@ srs_error_t SrsGbListener::on_tcp_client(ISrsListener* listener, srs_netfd_t stf
     }
 
     return err;
+}
+
+srs_error_t SrsGbListener::on_udp_packet(const sockaddr *from, const int fromlen, char *buf, int nb_buf) {
+    char address_string[64];
+    char port_string[16];
+    if(getnameinfo(from, fromlen,
+                   (char*)&address_string, sizeof(address_string),
+                   (char*)&port_string, sizeof(port_string),
+                   NI_NUMERICHOST|NI_NUMERICSERV)) {
+        return srs_error_new(ERROR_SYSTEM_IP_INVALID, "bad address");
+    }
+    std::string peer_ip = std::string(address_string);
+    int peer_port = atoi(port_string);
+
 }
 
 SrsLazyGbSipTcpConn::SrsLazyGbSipTcpConn(SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root)

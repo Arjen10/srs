@@ -167,12 +167,14 @@ public:
 };
 
 // The SIP and Media listener for GB.
-class SrsGbListener : public ISrsListener, public ISrsTcpHandler
+class SrsGbListener : public ISrsListener, public ISrsTcpHandler, public ISrsUdpHandler
 {
 private:
     SrsConfDirective* conf_;
     SrsTcpListener* media_listener_;
     SrsTcpListener* sip_listener_;
+
+    SrsUdpListener* sip_udp_listener_;
 public:
     SrsGbListener();
     virtual ~SrsGbListener();
@@ -183,6 +185,7 @@ public:
 // Interface ISrsTcpHandler
 public:
     virtual srs_error_t on_tcp_client(ISrsListener* listener, srs_netfd_t stfd);
+    virtual srs_error_t on_udp_packet(const sockaddr *from, const int fromlen, char *buf, int nb_buf);
 };
 
 // A GB28181 TCP SIP connection.

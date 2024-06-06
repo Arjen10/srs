@@ -180,7 +180,7 @@ srs_error_t SrsUdpListener::listen()
     if ((err = trd->start()) != srs_success) {
         return srs_error_wrap(err, "start thread");
     }
-    
+
     return err;
 }
 
