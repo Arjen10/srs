@@ -406,7 +406,7 @@ SrsGbListener::SrsGbListener() {
     sip_listener_ = new SrsTcpListener(this);
     media_listener_ = new SrsTcpListener(this);
 
-    sip_udp_listener_ = new SrsUdpListener(this);
+    sip_udp_listener_ = NULL;
 }
 
 SrsGbListener::~SrsGbListener()
@@ -414,6 +414,8 @@ SrsGbListener::~SrsGbListener()
     srs_freep(conf_);
     srs_freep(sip_listener_);
     srs_freep(media_listener_);
+
+    srs_freep(sip_udp_listener_);
 }
 
 srs_error_t SrsGbListener::initialize(SrsConfDirective* conf)
@@ -437,7 +439,7 @@ srs_error_t SrsGbListener::initialize(SrsConfDirective* conf)
     int port = _srs_config->get_stream_caster_sip_listen(conf);
     sip_listener_->set_endpoint(ip, port)->set_label("SIP-TCP");
 
-    sip_udp_listener_->set_endpoint(ip, port)->set_label("SIP-UDP");
+    sip_udp_listener_ = new SrsUdpMuxListener(this, ip, port);
 
     return err;
 }
@@ -500,18 +502,33 @@ srs_error_t SrsGbListener::on_tcp_client(ISrsListener* listener, srs_netfd_t stf
     return err;
 }
 
-srs_error_t SrsGbListener::on_udp_packet(const sockaddr *from, const int fromlen, char *buf, int nb_buf) {
-    char address_string[64];
-    char port_string[16];
-    if(getnameinfo(from, fromlen,
-                   (char*)&address_string, sizeof(address_string),
-                   (char*)&port_string, sizeof(port_string),
-                   NI_NUMERICHOST|NI_NUMERICSERV)) {
-        return srs_error_new(ERROR_SYSTEM_IP_INVALID, "bad address");
-    }
-    std::string peer_ip = std::string(address_string);
-    int peer_port = atoi(port_string);
+srs_error_t SrsGbListener::on_udp_packet(SrsUdpMuxSocket* skt) {
+    srs_error_t err = srs_success;
 
+    SrsHttpParser* parser = new SrsHttpParser();
+    SrsAutoFree(SrsHttpParser, parser);
+    // We might get SIP request or response message.
+    if ((err = parser->initialize(HTTP_BOTH)) != srs_success) {
+        return srs_error_wrap(err, "init parser");
+    }
+    // Use HTTP parser to parse SIP messages.
+    ISrsHttpMessage* hmsg = NULL;
+    SrsAutoFree(ISrsHttpMessage, hmsg);
+    SrsGbSipUdpReadWriter reader(skt);
+    if ((err = parser->parse_message(&reader, &hmsg)) != srs_success) {
+        return srs_error_wrap(err, "parse message");
+    }
+
+    SrsSipMessage smsg;
+    if ((err = smsg.parse(hmsg)) != srs_success) {
+        srs_warn("SIP: Drop msg type=%d, method=%d, err is %s", hmsg->message_type(), hmsg->method(), srs_error_summary(err).c_str());
+        srs_freep(err);
+    }
+    SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* conn = new SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>();
+    SrsLazyGbSipUdpNetwork* resource = dynamic_cast<SrsLazyGbSipUdpNetwork*>(conn->resource());
+    resource->setup(conf_, skt);
+    resource->on_sip_message(&smsg);
+    return err;
 }
 
 SrsLazyGbSipTcpConn::SrsLazyGbSipTcpConn(SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root)
@@ -2662,6 +2679,92 @@ srs_error_t SrsRecoverablePsContext::enter_recover_mode(SrsBuffer* stream, ISrsP
     handler->on_recover_mode(recover_);
 
     return err;
+}
+
+
+SrsLazyGbSipUdpNetwork::SrsLazyGbSipUdpNetwork(SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork> *wrapper_root) {
+    wrapper_root_ = wrapper_root;
+    state_ = SrsGbSipStateInit;
+    register_ = new SrsSipMessage();
+    invite_ok_ = new SrsSipMessage();
+    ssrc_v_ = 0;
+
+    conf_ = NULL;
+}
+
+SrsLazyGbSipUdpNetwork::~SrsLazyGbSipUdpNetwork() {
+
+    srs_freep(wrapper_root_);
+}
+
+void SrsLazyGbSipUdpNetwork::setup(SrsConfDirective *conf, SrsUdpMuxSocket *skt) {
+    srs_freep(conf_);
+    conf_ = conf->copy();
+
+    this->skt_ = skt;
+}
+
+SrsGbSipUdpReadWriter::SrsGbSipUdpReadWriter(SrsUdpMuxSocket *skt)
+{
+    skt_ = skt;
+}
+
+SrsGbSipUdpReadWriter::~SrsGbSipUdpReadWriter()
+{
+}
+
+void SrsLazyGbSipUdpNetwork::enqueue_sip_message(SrsSipMessage *msg) {
+    drive_state(msg);
+}
+
+srs_error_t SrsGbSipUdpReadWriter::read(void* buf, size_t size, ssize_t* nread)
+{
+    std::string str = skt_->data();
+    if (str.empty()) {
+        return srs_error_new(ERROR_SYSTEM_FILE_EOF, "EOF");
+    }
+
+    int len = srs_min(str.length(), size);
+    if (len == 0) {
+        return srs_error_new(-1, "no data");
+    }
+
+    memcpy(buf, str.data(), len);
+    str = str.substr(len);
+
+    if (nread) {
+        *nread = len;
+    }
+    return srs_success;
+}
+
+void SrsGbSipUdpReadWriter::set_recv_timeout(srs_utime_t tm) {
+}
+
+srs_utime_t SrsGbSipUdpReadWriter::get_recv_timeout() {
+}
+
+srs_error_t SrsGbSipUdpReadWriter::read_fully(void *buf, size_t size, ssize_t *nread) {
+}
+
+int64_t SrsGbSipUdpReadWriter::get_recv_bytes() {
+}
+
+int64_t SrsGbSipUdpReadWriter::get_send_bytes() {
+}
+
+void SrsGbSipUdpReadWriter::set_send_timeout(srs_utime_t tm) {
+}
+
+srs_utime_t SrsGbSipUdpReadWriter::get_send_timeout() {
+}
+
+srs_error_t SrsGbSipUdpReadWriter::write(void *buf, size_t size, ssize_t *nwrite) {
+    if (nwrite) *nwrite = size;
+    return skt_->sendto(buf, size, SRS_UTIME_NO_TIMEOUT);
+}
+
+srs_error_t SrsGbSipUdpReadWriter::writev(const iovec *iov, int iov_size, ssize_t *nwrite) {
 }
 
 void SrsRecoverablePsContext::quit_recover_mode(SrsBuffer* stream, ISrsPsMessageHandler* handler)

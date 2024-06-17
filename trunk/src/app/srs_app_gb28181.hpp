@@ -167,14 +167,14 @@ public:
 };
 
 // The SIP and Media listener for GB.
-class SrsGbListener : public ISrsListener, public ISrsTcpHandler, public ISrsUdpHandler
+class SrsGbListener : public ISrsListener, public ISrsTcpHandler, public ISrsUdpMuxHandler
 {
 private:
     SrsConfDirective* conf_;
     SrsTcpListener* media_listener_;
     SrsTcpListener* sip_listener_;
 
-    SrsUdpListener* sip_udp_listener_;
+    SrsUdpMuxListener* sip_udp_listener_;
 public:
     SrsGbListener();
     virtual ~SrsGbListener();
@@ -185,23 +185,24 @@ public:
 // Interface ISrsTcpHandler
 public:
     virtual srs_error_t on_tcp_client(ISrsListener* listener, srs_netfd_t stfd);
-    virtual srs_error_t on_udp_packet(const sockaddr *from, const int fromlen, char *buf, int nb_buf);
+    virtual srs_error_t on_udp_packet(SrsUdpMuxSocket* skt);
 };
 
 // A GB28181 TCP SIP connection.
 class SrsLazyGbSipTcpConn : public SrsLazyObject, public ISrsResource, public ISrsStartable, public ISrsCoroutineHandler
 {
-private:
+protected:
     SrsGbSipState state_;
-    SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root_;
-    SrsLazyObjectWrapper<SrsLazyGbSession>* session_;
     SrsSipMessage* register_;
     SrsSipMessage* invite_ok_;
 private:
+    SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root_;
+    SrsLazyObjectWrapper<SrsLazyGbSession>* session_;
+protected:
     std::string ssrc_str_;
     uint32_t ssrc_v_;
-private:
     SrsConfDirective* conf_;
+private:
     SrsTcpListener* sip_listener_;
     SrsTcpListener* media_listener_;
 private:
@@ -212,6 +213,8 @@ private:
 private:
     friend class SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>;
     SrsLazyGbSipTcpConn(SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root);
+protected:
+    SrsLazyGbSipTcpConn() {}
 public:
     virtual ~SrsLazyGbSipTcpConn();
 public:
@@ -229,7 +232,7 @@ public:
     srs_error_t on_sip_message(SrsSipMessage* msg);
     // Enqueue a SIP message to send, which might be a request or response.
     void enqueue_sip_message(SrsSipMessage* msg);
-private:
+protected:
     void drive_state(SrsSipMessage* msg);
     void register_response(SrsSipMessage* msg);
     void message_response(SrsSipMessage* msg, http_status status);
@@ -321,6 +324,49 @@ public:
     virtual srs_error_t cycle();
 private:
     srs_error_t do_cycle();
+};
+
+// A GB28181 UDP SIP Network. To obtain SIP business support, we directly extends from SrsLazyGbSipTcpConn.
+
+class SrsGbSipUdpReadWriter: public ISrsProtocolReadWriter
+{
+private:
+    SrsUdpMuxSocket* skt_;
+public:
+    SrsGbSipUdpReadWriter(SrsUdpMuxSocket* skt);
+
+    ~SrsGbSipUdpReadWriter();
+public:
+    virtual void set_recv_timeout(srs_utime_t tm);
+    virtual srs_utime_t get_recv_timeout();
+    virtual srs_error_t read(void* buf, size_t size, ssize_t* nread);
+    virtual srs_error_t read_fully(void* buf, size_t size, ssize_t* nread);
+    virtual int64_t get_recv_bytes();
+    virtual int64_t get_send_bytes();
+    virtual void set_send_timeout(srs_utime_t tm);
+    virtual srs_utime_t get_send_timeout();
+    virtual srs_error_t write(void* buf, size_t size, ssize_t* nwrite);
+    virtual srs_error_t writev(const iovec *iov, int iov_size, ssize_t* nwrite);
+};
+
+class SrsLazyGbSipUdpNetwork: public SrsLazyGbSipTcpConn
+{
+private:
+    SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* wrapper_root_;
+    SrsUdpMuxSocket* skt_;
+private:
+    friend class SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>;
+    SrsLazyGbSipUdpNetwork(SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* wrapper_root);
+public:
+    virtual ~SrsLazyGbSipUdpNetwork();
+private:
+    void setup(SrsConfDirective* conf, SrsTcpListener* sip, SrsTcpListener* media, srs_netfd_t stfd) {
+        throw std::runtime_error("can't use this function based SrsLazyGbSipTcpConn, so use SrsLazyGbSipUdpNetwork's setup() virtual function");
+    }
+public:
+    virtual void setup(SrsConfDirective* conf, SrsUdpMuxSocket* skt);
+
+    void enqueue_sip_message(SrsSipMessage* msg);
 };
 
 // The handler for a pack of PS PES packets.
