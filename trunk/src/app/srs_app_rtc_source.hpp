@@ -22,6 +22,7 @@
 #include <srs_app_hourglass.hpp>
 #include <srs_protocol_format.hpp>
 #include <srs_app_stream_bridge.hpp>
+#include <srs_core_autofree.hpp>
 
 class SrsRequest;
 class SrsMetaCache;
@@ -79,7 +80,9 @@ public:
 class SrsRtcConsumer
 {
 private:
-    SrsRtcSource* source;
+    // Because source references to this object, so we should directly use the source ptr.
+    SrsRtcSource* source_;
+private:
     std::vector<SrsRtpPacket*> queue;
     // when source id changed, notice all consumers
     bool should_update_source_id;
@@ -112,7 +115,7 @@ class SrsRtcSourceManager
 {
 private:
     srs_mutex_t lock;
-    std::map<std::string, SrsRtcSource*> pool;
+    std::map< std::string, SrsSharedPtr<SrsRtcSource> > pool;
 public:
     SrsRtcSourceManager();
     virtual ~SrsRtcSourceManager();
@@ -120,10 +123,13 @@ public:
     //  create source when fetch from cache failed.
     // @param r the client request.
     // @param pps the matched source, if success never be NULL.
-    virtual srs_error_t fetch_or_create(SrsRequest* r, SrsRtcSource** pps);
+    virtual srs_error_t fetch_or_create(SrsRequest* r, SrsSharedPtr<SrsRtcSource>& pps);
 public:
     // Get the exists source, NULL when not exists.
-    virtual SrsRtcSource* fetch(SrsRequest* r);
+    virtual SrsSharedPtr<SrsRtcSource> fetch(SrsRequest* r);
+public:
+    // Dispose and destroy the source.
+    virtual void eliminate(SrsRequest* r);
 };
 
 // Global singleton instance.
@@ -262,6 +268,7 @@ private:
     SrsAudioCodecId latest_codec_;
     SrsAudioTranscoder* codec_;
     bool keep_bframe;
+    bool keep_avc_nalu_sei;
     bool merge_nalus;
     uint16_t audio_sequence;
     uint16_t video_sequence;
@@ -564,7 +571,7 @@ public:
     // set to NULL, nack nerver copy it but set the pkt to NULL.
     srs_error_t on_nack(SrsRtpPacket** ppkt);
 public:
-    virtual srs_error_t on_rtp(SrsRtcSource* source, SrsRtpPacket* pkt) = 0;
+    virtual srs_error_t on_rtp(SrsSharedPtr<SrsRtcSource>& source, SrsRtpPacket* pkt) = 0;
     virtual srs_error_t check_send_nacks() = 0;
 protected:
     virtual srs_error_t do_check_send_nacks(uint32_t& timeout_nacks);
@@ -578,7 +585,7 @@ public:
 public:
     virtual void on_before_decode_payload(SrsRtpPacket* pkt, SrsBuffer* buf, ISrsRtpPayloader** ppayload, SrsRtspPacketPayloadType* ppt);
 public:
-    virtual srs_error_t on_rtp(SrsRtcSource* source, SrsRtpPacket* pkt);
+    virtual srs_error_t on_rtp(SrsSharedPtr<SrsRtcSource>& source, SrsRtpPacket* pkt);
     virtual srs_error_t check_send_nacks();
 };
 
@@ -590,7 +597,7 @@ public:
 public:
     virtual void on_before_decode_payload(SrsRtpPacket* pkt, SrsBuffer* buf, ISrsRtpPayloader** ppayload, SrsRtspPacketPayloadType* ppt);
 public:
-    virtual srs_error_t on_rtp(SrsRtcSource* source, SrsRtpPacket* pkt);
+    virtual srs_error_t on_rtp(SrsSharedPtr<SrsRtcSource>& source, SrsRtpPacket* pkt);
     virtual srs_error_t check_send_nacks();
 };
 
