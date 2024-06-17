@@ -205,9 +205,6 @@ protected:
     SrsGbSession* session_;
     SrsSipMessage* register_;
     SrsSipMessage* invite_ok_;
-private:
-    SrsLazyObjectWrapper<SrsLazyGbSipTcpConn>* wrapper_root_;
-    SrsLazyObjectWrapper<SrsLazyGbSession>* session_;
 protected:
     std::string ssrc_str_;
     uint32_t ssrc_v_;
@@ -342,7 +339,6 @@ private:
 };
 
 // A GB28181 UDP SIP Network. To obtain SIP business support, we directly extends from SrsLazyGbSipTcpConn.
-
 class SrsGbSipUdpReadWriter: public ISrsProtocolReadWriter
 {
 private:
@@ -364,7 +360,7 @@ public:
     virtual srs_error_t writev(const iovec *iov, int iov_size, ssize_t* nwrite);
 };
 
-class SrsLazyGbSipUdpNetwork: public SrsLazyGbSipTcpConn
+class SrsLazyGbSipUdpNetwork: public SrsGbSipTcpConn
 {
 private:
     SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* wrapper_root_;
