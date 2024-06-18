@@ -18,6 +18,7 @@
 
 #include <sstream>
 
+class SrsGbSipUdpReadWriter;
 class SrsConfDirective;
 class SrsTcpListener;
 class SrsResourceManager;
@@ -219,10 +220,11 @@ private:
     ISrsInterruptable* owner_coroutine_;
     ISrsContextIdSetter* owner_cid_;
     SrsContextId cid_;
+protected:
+    SrsGbSipTcpSender* sender_;
 private:
     SrsTcpConnection* conn_;
     SrsGbSipTcpReceiver* receiver_;
-    SrsGbSipTcpSender* sender_;
 public:
     SrsGbSipTcpConn();
     virtual ~SrsGbSipTcpConn();
@@ -315,11 +317,14 @@ class SrsGbSipTcpSender : public ISrsStartable, public ISrsCoroutineHandler
 private:
     SrsCoroutine* trd_;
     SrsTcpConnection* conn_;
+    // udp support
+    SrsGbSipUdpReadWriter* udp_;
 private:
     std::vector<SrsSipMessage*> msgs_;
     srs_cond_t wait_;
 public:
     SrsGbSipTcpSender(SrsTcpConnection* conn);
+    SrsGbSipTcpSender(SrsGbSipUdpReadWriter* udp);
     virtual ~SrsGbSipTcpSender();
 public:
     // Push message to queue, and sender will send out in dedicate coroutine.
@@ -334,15 +339,33 @@ public:
 // Interface ISrsOneCycleThreadHandler
 public:
     virtual srs_error_t cycle();
+    ISrsProtocolReadWriter* read_writer();
 private:
     srs_error_t do_cycle();
 };
 
 // A GB28181 UDP SIP Network. To obtain SIP business support, we directly extends from SrsLazyGbSipTcpConn.
+class SrsLazyGbSipUdpNetwork: public SrsGbSipTcpConn
+{
+private:
+    SrsSharedResource<SrsLazyGbSipUdpNetwork>* wrapper_root_;
+    SrsUdpMuxSocket* skt_sendonly_;
+public:
+    SrsLazyGbSipUdpNetwork();
+    virtual ~SrsLazyGbSipUdpNetwork();
+private:
+    void setup(SrsConfDirective* conf, SrsTcpListener* sip, SrsTcpListener* media, srs_netfd_t stfd) {
+        throw std::runtime_error("can't use this function based SrsLazyGbSipTcpConn, so use SrsLazyGbSipUdpNetwork's setup() virtual function");
+    }
+public:
+    virtual void setup(SrsConfDirective* conf, SrsUdpMuxSocket* skt);
+};
+
 class SrsGbSipUdpReadWriter: public ISrsProtocolReadWriter
 {
 private:
     SrsUdpMuxSocket* skt_;
+    SrsUdpMuxSocket* skt_sendonly_;
 public:
     SrsGbSipUdpReadWriter(SrsUdpMuxSocket* skt);
 
@@ -358,26 +381,6 @@ public:
     virtual srs_utime_t get_send_timeout();
     virtual srs_error_t write(void* buf, size_t size, ssize_t* nwrite);
     virtual srs_error_t writev(const iovec *iov, int iov_size, ssize_t* nwrite);
-};
-
-class SrsLazyGbSipUdpNetwork: public SrsGbSipTcpConn
-{
-private:
-    SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* wrapper_root_;
-    SrsUdpMuxSocket* skt_;
-private:
-    friend class SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>;
-    SrsLazyGbSipUdpNetwork(SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* wrapper_root);
-public:
-    virtual ~SrsLazyGbSipUdpNetwork();
-private:
-    void setup(SrsConfDirective* conf, SrsTcpListener* sip, SrsTcpListener* media, srs_netfd_t stfd) {
-        throw std::runtime_error("can't use this function based SrsLazyGbSipTcpConn, so use SrsLazyGbSipUdpNetwork's setup() virtual function");
-    }
-public:
-    virtual void setup(SrsConfDirective* conf, SrsUdpMuxSocket* skt);
-
-    void enqueue_sip_message(SrsSipMessage* msg);
 };
 
 // The handler for a pack of PS PES packets.

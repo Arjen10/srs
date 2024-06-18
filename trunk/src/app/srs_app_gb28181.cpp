@@ -522,10 +522,9 @@ srs_error_t SrsGbListener::on_udp_packet(SrsUdpMuxSocket* skt) {
         srs_warn("SIP: Drop msg type=%d, method=%d, err is %s", hmsg->message_type(), hmsg->method(), srs_error_summary(err).c_str());
         srs_freep(err);
     }
-    SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>* conn = new SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork>();
-    SrsLazyGbSipUdpNetwork* resource = dynamic_cast<SrsLazyGbSipUdpNetwork*>(conn->resource());
-    resource->setup(conf_, skt);
-    resource->on_sip_message(&smsg);
+    SrsLazyGbSipUdpNetwork resource;
+    resource.setup(conf_, skt);
+    resource.on_sip_message(&smsg);
     return err;
 }
 
@@ -1035,7 +1034,10 @@ srs_error_t SrsGbSipTcpConn::bind_session(SrsSipMessage* msg, SrsGbSession** pse
     }
 
     // Notice session to use current SIP connection.
-    raw_session->on_sip_transport(*wrapper_);
+    if (msg->via_transport_ != "UDP") {
+        //TODO UDP support
+        raw_session->on_sip_transport(*wrapper_);
+    }
     *psession = raw_session;
 
     return err;
@@ -1128,6 +1130,14 @@ srs_error_t SrsGbSipTcpReceiver::do_cycle()
 SrsGbSipTcpSender::SrsGbSipTcpSender(SrsTcpConnection* conn)
 {
     conn_ = conn;
+    udp_ = NULL;
+    wait_ = srs_cond_new();
+    trd_ = new SrsSTCoroutine("sip-sender", this);
+}
+
+SrsGbSipTcpSender::SrsGbSipTcpSender(SrsGbSipUdpReadWriter *udp) {
+    conn_ = NULL;
+    udp_ = udp;
     wait_ = srs_cond_new();
     trd_ = new SrsSTCoroutine("sip-sender", this);
 }
@@ -1182,6 +1192,18 @@ srs_error_t SrsGbSipTcpSender::cycle()
     return err;
 }
 
+ISrsProtocolReadWriter * SrsGbSipTcpSender::read_writer() {
+    if (this->conn_ != NULL) {
+        // TCP
+        return conn_;
+    }
+
+    if (this->udp_ != NULL) {
+        return udp_;
+    }
+    throw std::runtime_error("SIP: No connection");
+}
+
 srs_error_t SrsGbSipTcpSender::do_cycle()
 {
     srs_error_t err = srs_success;
@@ -1198,9 +1220,9 @@ srs_error_t SrsGbSipTcpSender::do_cycle()
         SrsSipMessage* msg = msgs_.front();
         msgs_.erase(msgs_.begin());
         SrsAutoFree(SrsSipMessage, msg);
-
+        ISrsProtocolReadWriter* read_writer = this->read_writer();
         if (msg->type_ == HTTP_RESPONSE) {
-            SrsSipResponseWriter res(conn_);
+            SrsSipResponseWriter res(read_writer);
             res.header()->set("Via", msg->via_);
             res.header()->set("From", msg->from_);
             res.header()->set("To", msg->to_);
@@ -1217,7 +1239,7 @@ srs_error_t SrsGbSipTcpSender::do_cycle()
                 return srs_error_wrap(err, "response");
             }
         } else if (msg->type_ == HTTP_REQUEST) {
-            SrsSipRequestWriter req(conn_);
+            SrsSipRequestWriter req(read_writer);
             req.header()->set("Via", msg->via_);
             req.header()->set("From", msg->from_);
             req.header()->set("To", msg->to_);
@@ -2669,9 +2691,8 @@ srs_error_t SrsRecoverablePsContext::enter_recover_mode(SrsBuffer* stream, ISrsP
     return err;
 }
 
-
-SrsLazyGbSipUdpNetwork::SrsLazyGbSipUdpNetwork(SrsLazyObjectWrapper<SrsLazyGbSipUdpNetwork> *wrapper_root) {
-    wrapper_root_ = wrapper_root;
+SrsLazyGbSipUdpNetwork::SrsLazyGbSipUdpNetwork() {
+    wrapper_root_ = NULL;
     state_ = SrsGbSipStateInit;
     register_ = new SrsSipMessage();
     invite_ok_ = new SrsSipMessage();
@@ -2683,26 +2704,27 @@ SrsLazyGbSipUdpNetwork::SrsLazyGbSipUdpNetwork(SrsLazyObjectWrapper<SrsLazyGbSip
 SrsLazyGbSipUdpNetwork::~SrsLazyGbSipUdpNetwork() {
 
     srs_freep(wrapper_root_);
+    srs_freep(conf_);
+    srs_freep(sender_);
+
 }
 
 void SrsLazyGbSipUdpNetwork::setup(SrsConfDirective *conf, SrsUdpMuxSocket *skt) {
     srs_freep(conf_);
     conf_ = conf->copy();
 
-    this->skt_ = skt;
+    sender_ = new SrsGbSipTcpSender(new SrsGbSipUdpReadWriter(skt));
 }
 
 SrsGbSipUdpReadWriter::SrsGbSipUdpReadWriter(SrsUdpMuxSocket *skt)
 {
     skt_ = skt;
+    skt_sendonly_ = skt->copy_sendonly();
 }
 
 SrsGbSipUdpReadWriter::~SrsGbSipUdpReadWriter()
 {
-}
-
-void SrsLazyGbSipUdpNetwork::enqueue_sip_message(SrsSipMessage *msg) {
-    drive_state(msg);
+    srs_freep(skt_sendonly_);
 }
 
 srs_error_t SrsGbSipUdpReadWriter::read(void* buf, size_t size, ssize_t* nread)
@@ -2749,7 +2771,7 @@ srs_utime_t SrsGbSipUdpReadWriter::get_send_timeout() {
 
 srs_error_t SrsGbSipUdpReadWriter::write(void *buf, size_t size, ssize_t *nwrite) {
     if (nwrite) *nwrite = size;
-    return skt_->sendto(buf, size, SRS_UTIME_NO_TIMEOUT);
+    return skt_sendonly_->sendto(buf, size, SRS_UTIME_NO_TIMEOUT);
 }
 
 srs_error_t SrsGbSipUdpReadWriter::writev(const iovec *iov, int iov_size, ssize_t *nwrite) {
