@@ -21,6 +21,7 @@
 #include <srs_protocol_st.hpp>
 #include <srs_app_hourglass.hpp>
 #include <srs_app_hybrid.hpp>
+#include <srs_app_gb28181_udp.hpp>
 
 class SrsServer;
 class ISrsHttpServeMux;
@@ -140,6 +141,7 @@ private:
 #ifdef SRS_GB28181
     // Stream Caster for GB28181.
     SrsGbListener* stream_caster_gb28181_;
+    SrsGbUDPListener* stream_caster_gb28181_udp_;
 #endif
 private:
     // Signal manager which convert gignal to io message.

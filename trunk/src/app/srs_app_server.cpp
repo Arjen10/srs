@@ -346,6 +346,7 @@ SrsServer::SrsServer()
     exporter_listener_ = new SrsTcpListener(this);
 #ifdef SRS_GB28181
     stream_caster_gb28181_ = new SrsGbListener();
+    stream_caster_gb28181_udp_ = new SrsGbUDPListener();
 #endif
 
     // donot new object in constructor,
@@ -403,6 +404,7 @@ void SrsServer::destroy()
     srs_freep(exporter_listener_);
 #ifdef SRS_GB28181
     srs_freep(stream_caster_gb28181_);
+    srs_freep(stream_caster_gb28181_udp_);
 #endif
 }
 
@@ -422,6 +424,7 @@ void SrsServer::dispose()
     exporter_listener_->close();
 #ifdef SRS_GB28181
     stream_caster_gb28181_->close();
+    stream_caster_gb28181_udp_->close();
 #endif
 
     // Fast stop to notify FFMPEG to quit, wait for a while then fast kill.
@@ -453,6 +456,7 @@ void SrsServer::gracefully_dispose()
     exporter_listener_->close();
 #ifdef SRS_GB28181
     stream_caster_gb28181_->close();
+    stream_caster_gb28181_udp_->close();
 #endif
     srs_trace("listeners closed");
 
@@ -652,6 +656,12 @@ srs_error_t SrsServer::listen()
             }
         } else if (srs_stream_caster_is_gb28181(caster)) {
         #ifdef SRS_GB28181
+            if ((err = stream_caster_gb28181_udp_->initialize(conf->copy())) != srs_success) {
+                return srs_error_wrap(err, "gb28181 udp initialize");
+            }
+            if ((err = stream_caster_gb28181_udp_->listen()) != srs_success) {
+                return srs_error_wrap(err, "gb28181 udp listen");
+            }
             listener = stream_caster_gb28181_;
             if ((err = stream_caster_gb28181_->initialize(conf)) != srs_success) {
                 return srs_error_wrap(err, "initialize");
