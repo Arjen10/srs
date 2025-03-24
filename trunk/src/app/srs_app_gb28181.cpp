@@ -705,6 +705,12 @@ void SrsGbSipTcpConn::drive_state(SrsSipMessage* msg)
     }
 }
 
+srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
+{
+    srs_error_t err = srs_success;
+    return err;
+}
+
 void SrsGbSipTcpConn::register_response(SrsSipMessage* msg)
 {
     SrsSipMessage* res = new SrsSipMessage();

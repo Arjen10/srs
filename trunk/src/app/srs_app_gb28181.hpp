@@ -280,6 +280,7 @@ public:
     void enqueue_sip_message(SrsSipMessage* msg);
 private:
     void drive_state(SrsSipMessage* msg);
+    srs_error_t password_verification(SrsSipMessage* msg);
     void register_response(SrsSipMessage* msg);
     void message_response(SrsSipMessage* msg, http_status status);
     void invite_ack(SrsSipMessage* msg);
@@ -596,6 +597,8 @@ public:
     std::string cseq_;
     uint32_t cseq_number_;
     std::string cseq_method_;
+public:
+    std::string authorization_;
 public:
     // See https://openstd.samr.gov.cn/bzgk/gb/newGbInfo?hcno=469659DC56B9B8187671FF08748CEC89
     std::string subject_;
