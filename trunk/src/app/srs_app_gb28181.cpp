@@ -616,6 +616,10 @@ srs_error_t SrsGbSipTcpConn::on_sip_message(SrsSipMessage* msg)
 
     // Notify session about the SIP message.
     if (msg->is_register()) {
+        if(!password_verification(msg)) {
+            message_response(msg, HTTP_STATUS_UNAUTHORIZED);
+            return err;
+        }
         register_response(msg); // Response for REGISTER.
     } else if (msg->is_message()) {
         // Response for MESSAGE, the heartbeat message.
@@ -705,10 +709,12 @@ void SrsGbSipTcpConn::drive_state(SrsSipMessage* msg)
     }
 }
 
-srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
+bool SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
 {
-    srs_error_t err = srs_success;
-    return err;
+    if(msg->authorization_.empty()) {
+        return false;
+    }
+    return true;
 }
 
 void SrsGbSipTcpConn::register_response(SrsSipMessage* msg)
@@ -739,6 +745,9 @@ void SrsGbSipTcpConn::message_response(SrsSipMessage* msg, http_status status)
     res->to_ = msg->to_;
     res->cseq_ = msg->cseq_;
     res->call_id_ = msg->call_id_;
+    if (status == HTTP_STATUS_UNAUTHORIZED) {
+        res->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
+    }
 
     enqueue_sip_message(res);
 }
@@ -1198,6 +1207,9 @@ srs_error_t SrsGbSipTcpSender::do_cycle()
             res.header()->set("CSeq", msg->cseq_);
             res.header()->set("Call-ID", msg->call_id_);
             res.header()->set("User-Agent", RTMP_SIG_SRS_SERVER);
+            if (!msg->www_authenticate_.empty()) {
+                res.header()->set("WWW-Authenticate", msg->www_authenticate_);
+            }
             if (!msg->contact_.empty()) res.header()->set("Contact", msg->contact_);
             if (msg->expires_ != UINT32_MAX) res.header()->set("Expires", srs_int2str(msg->expires_));
 
