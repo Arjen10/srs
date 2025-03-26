@@ -711,9 +711,11 @@ void SrsGbSipTcpConn::drive_state(SrsSipMessage* msg)
 
 bool SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
 {
-    if(msg->authorization_.empty()) {
+    std::string &auth = msg->authorization_;
+    if(auth.empty()) {
         return false;
     }
+
     return true;
 }
 
@@ -2276,6 +2278,7 @@ srs_error_t SrsSipMessage::parse(ISrsHttpMessage* m)
     cseq_ = m->header()->get("CSeq");
     contact_ = m->header()->get("Contact");
     subject_ = m->header()->get("Subject");
+    authorization_ = m->header()->get("Authorization");
     content_type_ = m->header()->content_type();
 
     string expires = m->header()->get("Expires");
@@ -2317,6 +2320,9 @@ srs_error_t SrsSipMessage::parse(ISrsHttpMessage* m)
     }
     if ((err = parse_contact(contact_)) != srs_success) {
         return srs_error_wrap(err, "parse contact=%s", contact_.c_str());
+    }
+    if ((err = parse_authorization(authorization_)) != srs_success) {
+        return srs_error_wrap(err, "parse authorization_=%s", authorization_.c_str());
     }
 
     srs_sip_parse_address(from_address_, from_address_user_, from_address_host_);
@@ -2442,6 +2448,75 @@ srs_error_t SrsSipMessage::parse_cseq(const std::string& cseq)
         return srs_error_new(ERROR_GB_SIP_HEADER, "CSeq method=%s is invalid, expect=%d(%s)", cseq_method_.c_str(), method_, http_method_str(method_));
     }
 
+    return err;
+}
+
+srs_error_t SrsSipMessage::parse_authorization(const std::string& authorization)
+{
+    srs_error_t err = srs_success;
+    if (authorization.empty()) {
+        return err;
+    }
+    // in gb28181, the 'authorization' field should be split by ', ' (comma followed by a space).
+    vector<string> params = srs_string_split(authorization, ", ");
+    if (params.empty()) {
+        return srs_error_new(ERROR_GB_SIP_HEADER, "Authorization is empty");
+    }
+    for (int i = 0; i < (int) params.size(); i++) {
+        string param = params[i];
+        std::size_t first_quote = param.find('\"');
+        // when '"' is absent, process the fields: algorithm, qop, and nc
+        if (first_quote == std::string::npos) {
+            std::size_t equal_pos = param.find('=');
+            if (equal_pos == std::string::npos) {
+                return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'='_param = %s", param.c_str());
+            }
+            std::string sub_pos = param.substr(equal_pos + 1);
+            if (srs_string_starts_with(param, "algorithm")) {
+                this->auth_algorithm_ = sub_pos;
+                continue;
+            }
+            if (srs_string_starts_with(param, "qop")) {
+                this->auth_qop_ = sub_pos;
+                continue;
+            }
+            if (srs_string_starts_with(param, "nc")) {
+                this->auth_nc_ = sub_pos;
+                continue;
+            }
+            return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'='_param = %s", param.c_str());
+        }
+        std::size_t second_quote = param.find('\"', first_quote + 1);
+        // missing second '"', return error immediately.
+        if (second_quote == std::string::npos) {
+            return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'\"'_param = %s", param.c_str());
+        }
+        std::string sub_quote = param.substr(first_quote + 1, second_quote - first_quote - 1);
+        if (srs_string_starts_with(param, "Digest username")) {
+            this->auth_username_ = sub_quote;
+            continue;
+        }
+        if (srs_string_starts_with(param, "realm")) {
+            this->auth_realm_ = sub_quote;
+            continue;
+        }
+        if (srs_string_starts_with(param, "nonce")) {
+            this->auth_nonce_ = sub_quote;
+            continue;
+        }
+        if (srs_string_starts_with(param, "uri")) {
+            this->auth_uri_ = sub_quote;
+            continue;
+        }
+        if (srs_string_starts_with(param, "response")) {
+            this->auth_response_ = sub_quote;
+            continue;
+        }
+        if (srs_string_starts_with(param, "cnonce")) {
+            this->auth_cnonce_ = sub_quote;
+            continue;
+        }
+    }
     return err;
 }
 

@@ -598,7 +598,29 @@ public:
     uint32_t cseq_number_;
     std::string cseq_method_;
 public:
+    // 'authorization_' looks like this, it should actually be one line, the formatting here just breaks it up
+    // Digest username="34020000001320000264", realm="3402000000", nonce="6eb1340d99c404a0e4d3b68d15d1d46f",
+    // uri="sip:34020000002000000001@3402000000", response="4c97657aa0412c25d4b862219b635c17",
+    // algorithm=MD5, cnonce="0a4f113b", qop=auth, nc=00000001
     std::string authorization_;
+    // for example: 34020000001320000264
+    std::string auth_username_;
+    // for example: 3402000000
+    std::string auth_realm_;
+    // for example: 6eb1340d99c404a0e4d3b68d15d1d46f
+    std::string auth_nonce_;
+    // for example: sip:34020000002000000001@3402000000
+    std::string auth_uri_;
+    // for example: 325f777c89164936888d83a2d6330d37
+    std::string auth_response_;
+    // for example: MD5
+    std::string auth_algorithm_;
+    // for example: 0a4f113b
+    std::string auth_cnonce_;
+    // for example: auth
+    std::string auth_qop_;
+    // for example: 00000001
+    std::string auth_nc_;
     std::string www_authenticate_;
 public:
     // See https://openstd.samr.gov.cn/bzgk/gb/newGbInfo?hcno=469659DC56B9B8187671FF08748CEC89
@@ -624,6 +646,7 @@ private:
     srs_error_t parse_from(const std::string& from);
     srs_error_t parse_to(const std::string& to);
     srs_error_t parse_cseq(const std::string& cseq);
+    srs_error_t parse_authorization(const std::string& authorization);
     srs_error_t parse_contact(const std::string& contact);
 public:
     bool is_register() {
