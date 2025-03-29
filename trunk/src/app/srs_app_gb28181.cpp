@@ -711,30 +711,46 @@ void SrsGbSipTcpConn::drive_state(SrsSipMessage* msg)
 srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
 {
     srs_error_t err = srs_success;
+    std::string password = this->conf_->get("sip")->get("password")->arg0();
+    // if password is not configured, return success
+    if (password.empty()) {
+        return err;
+    }
     std::string &auth = msg->authorization_;
+    SrsUniquePtr<SrsSipMessage> prt(msg->copy());
+    // todo uuid 待完成
+    uuid_t uuid;
+    uuid_generate(uuid);
+    // todo 待优化
+    prt->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
     // todo 还需要加入配置文件的判断
     if(auth.empty()) {
-        // todo 返回 401
+        srs_trace("SIP: unauthenticated device=%s", this->register_->device_id().c_str());
+        message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
         return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `Authorization` fields");
     }
-    // gb28181 requires 'realm', 'nonce' and 'response' fields in the request header.
-    // ff missing, return 401
+    // gb28181 requires 'realm', 'nonce' or 'response' fields in the request header. if missing, return 401
     if (msg->auth_realm_.empty() || msg->auth_nonce_.empty() || msg->auth_response_.empty()) {
-        // todo 返回 401
+        srs_trace("SIP: the client missing 'realm', 'nonce' or 'response' fields device=%s",
+                  this->register_->device_id().c_str());
+        message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
         return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `realm` and `response` fields");
     }
-    std::string hash1 = calculate_md5(msg->auth_username_ + ":" + msg->auth_realm_ + ":" + "12345678");
+    std::string hash1 = calculate_md5(msg->auth_username_ + ":" + msg->auth_realm_ + ":" + password);
     // todo 这里还有问题
     std::string hash2 = calculate_md5(msg->method_ + ":" + msg->auth_uri_);
     // Digest
-    std::string response_input = hash1 + ":" + msg->auth_nonce_ + ":" + msg->auth_nc_ + ":" + msg->auth_cnonce_ + ":" + msg->auth_qop_ + ":" + hash2;
+    std::string response_input = hash1 + ":" + msg->auth_nonce_ + ":" + msg->auth_nc_ + ":"
+            + msg->auth_cnonce_ + ":" + msg->auth_qop_ + ":" + hash2;
     std::string ret_resp = calculate_md5(response_input);
     // the verification passes if the calculated result equals the client-submitted value
     if (ret_resp == msg->auth_response_) {
+        srs_info("SIP: Verification succeeded device=%s", this->register_->device_id().c_str());
         return err;
     }
-    // todo 这里要返回 403
     // the verification failed.
+    message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
+    srs_trace("SIP: Verification failed device=%s", this->register_->device_id().c_str());
     return srs_error_new(ERROR_GB_SIP_MESSAGE, "gb28181 verification failed");
 }
 
@@ -778,9 +794,7 @@ void SrsGbSipTcpConn::message_response(SrsSipMessage* msg, http_status status)
     res->to_ = msg->to_;
     res->cseq_ = msg->cseq_;
     res->call_id_ = msg->call_id_;
-    if (status == HTTP_STATUS_UNAUTHORIZED) {
-        res->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
-    }
+    res->www_authenticate_ = msg->www_authenticate_;
 
     enqueue_sip_message(res);
 }

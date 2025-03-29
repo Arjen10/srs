@@ -15,6 +15,7 @@
 #include <srs_protocol_http_conn.hpp>
 #include <srs_kernel_ps.hpp>
 #include <srs_app_conn.hpp>
+#include <srs_app_uuid.hpp>
 
 #include <sstream>
 #include <openssl/md5.h>
