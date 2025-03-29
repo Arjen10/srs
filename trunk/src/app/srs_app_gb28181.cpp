@@ -616,8 +616,7 @@ srs_error_t SrsGbSipTcpConn::on_sip_message(SrsSipMessage* msg)
 
     // Notify session about the SIP message.
     if (msg->is_register()) {
-        if(!password_verification(msg)) {
-            message_response(msg, HTTP_STATUS_UNAUTHORIZED);
+        if((err = password_verification(msg)) != srs_success) {
             return err;
         }
         register_response(msg); // Response for REGISTER.
@@ -709,14 +708,46 @@ void SrsGbSipTcpConn::drive_state(SrsSipMessage* msg)
     }
 }
 
-bool SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
+srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
 {
+    srs_error_t err = srs_success;
     std::string &auth = msg->authorization_;
+    // todo 还需要加入配置文件的判断
     if(auth.empty()) {
-        return false;
+        // todo 返回 401
+        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `Authorization` fields");
     }
+    // gb28181 requires 'realm', 'nonce' and 'response' fields in the request header.
+    // ff missing, return 401
+    if (msg->auth_realm_.empty() || msg->auth_nonce_.empty() || msg->auth_response_.empty()) {
+        // todo 返回 401
+        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `realm` and `response` fields");
+    }
+    std::string hash1 = calculate_md5(msg->auth_username_ + ":" + msg->auth_realm_ + ":" + "12345678");
+    // todo 这里还有问题
+    std::string hash2 = calculate_md5(msg->method_ + ":" + msg->auth_uri_);
+    // Digest
+    std::string response_input = hash1 + ":" + msg->auth_nonce_ + ":" + msg->auth_nc_ + ":" + msg->auth_cnonce_ + ":" + msg->auth_qop_ + ":" + hash2;
+    std::string ret_resp = calculate_md5(response_input);
+    // the verification passes if the calculated result equals the client-submitted value
+    if (ret_resp == msg->auth_response_) {
+        return err;
+    }
+    // todo 这里要返回 403
+    // the verification failed.
+    return srs_error_new(ERROR_GB_SIP_MESSAGE, "gb28181 verification failed");
+}
 
-    return true;
+std::string SrsGbSipTcpConn::calculate_md5(const std::string& input) {
+    unsigned char digest[MD5_DIGEST_LENGTH];
+    // use openssl md5
+    MD5((const unsigned char*) input.c_str(), input.length(), digest);
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (int i = 0; i < MD5_DIGEST_LENGTH; ++i) {
+        ss << std::setw(2) << (unsigned int) digest[i];
+    }
+    return ss.str();
 }
 
 void SrsGbSipTcpConn::register_response(SrsSipMessage* msg)
@@ -2468,10 +2499,10 @@ srs_error_t SrsSipMessage::parse_authorization(const std::string& authorization)
         // when '"' is absent, process the fields: algorithm, qop, and nc
         if (first_quote == std::string::npos) {
             std::size_t equal_pos = param.find('=');
-            if (equal_pos == std::string::npos) {
-                return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'='_param = %s", param.c_str());
-            }
-            std::string sub_pos = param.substr(equal_pos + 1);
+            // if no '=' is detected, substitute with empty string for normal processing
+            std::string sub_pos = equal_pos == std::string::npos
+                    ? ""
+                    : param.substr(equal_pos + 1);
             if (srs_string_starts_with(param, "algorithm")) {
                 this->auth_algorithm_ = sub_pos;
                 continue;
@@ -2484,14 +2515,13 @@ srs_error_t SrsSipMessage::parse_authorization(const std::string& authorization)
                 this->auth_nc_ = sub_pos;
                 continue;
             }
-            return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'='_param = %s", param.c_str());
+            continue;
         }
         std::size_t second_quote = param.find('\"', first_quote + 1);
-        // missing second '"', return error immediately.
-        if (second_quote == std::string::npos) {
-            return srs_error_new(ERROR_GB_SIP_MESSAGE, "parse authorization_'\"'_param = %s", param.c_str());
-        }
-        std::string sub_quote = param.substr(first_quote + 1, second_quote - first_quote - 1);
+        // missing second '"', substitute with empty string for normal processing
+        std::string sub_quote = second_quote == std::string::npos
+                ? ""
+                : param.substr(first_quote + 1, second_quote - first_quote - 1);
         if (srs_string_starts_with(param, "Digest username")) {
             this->auth_username_ = sub_quote;
             continue;
@@ -2909,7 +2939,7 @@ srs_error_t SrsGoApiGbPublish::bind_session(std::string id, uint64_t ssrc)
         srs_freep(executor);
         return srs_error_wrap(err, "gb session");
     }
-    
+
     return err;
 }
 

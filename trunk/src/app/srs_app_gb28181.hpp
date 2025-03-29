@@ -17,6 +17,8 @@
 #include <srs_app_conn.hpp>
 
 #include <sstream>
+#include <openssl/md5.h>
+#include <iomanip>
 
 class SrsConfDirective;
 class SrsTcpListener;
@@ -280,7 +282,8 @@ public:
     void enqueue_sip_message(SrsSipMessage* msg);
 private:
     void drive_state(SrsSipMessage* msg);
-    bool password_verification(SrsSipMessage* msg);
+    srs_error_t password_verification(SrsSipMessage* msg);
+    std::string calculate_md5(const std::string& input);
     void register_response(SrsSipMessage* msg);
     void message_response(SrsSipMessage* msg, http_status status);
     void invite_ack(SrsSipMessage* msg);
@@ -603,23 +606,23 @@ public:
     // uri="sip:34020000002000000001@3402000000", response="4c97657aa0412c25d4b862219b635c17",
     // algorithm=MD5, cnonce="0a4f113b", qop=auth, nc=00000001
     std::string authorization_;
-    // for example: 34020000001320000264
+    // for example: Digest username="34020000001320000264"
     std::string auth_username_;
-    // for example: 3402000000
+    // for example: realm="3402000000"
     std::string auth_realm_;
-    // for example: 6eb1340d99c404a0e4d3b68d15d1d46f
+    // for example: nonce="6eb1340d99c404a0e4d3b68d15d1d46f"
     std::string auth_nonce_;
-    // for example: sip:34020000002000000001@3402000000
+    // for example: uri="sip:34020000002000000001@3402000000"
     std::string auth_uri_;
-    // for example: 325f777c89164936888d83a2d6330d37
+    // for example: response="4c97657aa0412c25d4b862219b635c17"
     std::string auth_response_;
-    // for example: MD5
+    // for example: algorithm=MD5
     std::string auth_algorithm_;
-    // for example: 0a4f113b
+    // for example: cnonce="0a4f113b"
     std::string auth_cnonce_;
-    // for example: auth
+    // for example: qop=auth
     std::string auth_qop_;
-    // for example: 00000001
+    // for example: nc=00000001
     std::string auth_nc_;
     std::string www_authenticate_;
 public:
