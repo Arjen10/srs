@@ -725,8 +725,7 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
     std::string uuid_str(out);
     // remove '-'
     uuid_str.erase(std::remove(uuid_str.begin(), uuid_str.end(), '-'), uuid_str.end());
-    // todo 待优化
-    prt->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
+    prt->www_authenticate_ = "Digest realm=\""+ msg->from_address_host_ + "\",qop=\"auth\",nonce=\"" + uuid_str +"\"";
     // todo 还需要加入配置文件的判断
     if(auth.empty()) {
         message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
