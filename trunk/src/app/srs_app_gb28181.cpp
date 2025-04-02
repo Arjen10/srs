@@ -725,16 +725,15 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
     prt->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
     // todo 还需要加入配置文件的判断
     if(auth.empty()) {
-        srs_trace("SIP: unauthenticated device=%s", this->register_->device_id().c_str());
         message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
-        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `Authorization` fields");
+        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `Authorization` fields, device=%s",
+                             this->register_->device_id().c_str());
     }
     // gb28181 requires 'realm', 'nonce' or 'response' fields in the request header. if missing, return 401
     if (msg->auth_realm_.empty() || msg->auth_nonce_.empty() || msg->auth_response_.empty()) {
-        srs_trace("SIP: the client missing 'realm', 'nonce' or 'response' fields device=%s",
-                  this->register_->device_id().c_str());
         message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
-        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `realm` and `response` fields");
+        return srs_error_new(ERROR_GB_SIP_HEADER, "The request header is missing the `realm` and `response` fields, device=%s",
+                             this->register_->device_id().c_str());
     }
     std::string hash1 = calculate_md5(msg->auth_username_ + ":" + msg->auth_realm_ + ":" + password);
     // todo 这里还有问题
@@ -750,8 +749,8 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
     }
     // the verification failed.
     message_response(prt.get(), HTTP_STATUS_UNAUTHORIZED);
-    srs_trace("SIP: Verification failed device=%s", this->register_->device_id().c_str());
-    return srs_error_new(ERROR_GB_SIP_MESSAGE, "gb28181 verification failed");
+    return srs_error_new(ERROR_GB_SIP_MESSAGE, "gb28181 verification failed, device=%s",
+                         this->register_->device_id().c_str());
 }
 
 std::string SrsGbSipTcpConn::calculate_md5(const std::string& input) {
