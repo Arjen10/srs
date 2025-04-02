@@ -716,7 +716,7 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
     if (password.empty()) {
         return err;
     }
-    std::string &auth = msg->authorization_;
+    std::string auth = msg->authorization_;
     SrsUniquePtr<SrsSipMessage> prt(msg->copy());
     // todo uuid 待完成
     uuid_t uuid;
@@ -736,8 +736,9 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
                              this->register_->device_id().c_str());
     }
     std::string hash1 = calculate_md5(msg->auth_username_ + ":" + msg->auth_realm_ + ":" + password);
-    // todo 这里还有问题
-    std::string hash2 = calculate_md5(msg->method_ + ":" + msg->auth_uri_);
+    // method_str = REGISTER
+    std::string method_str(http_method_str(msg->method_));
+    std::string hash2 = calculate_md5(method_str + ":" + msg->auth_uri_);
     // Digest
     std::string response_input = hash1 + ":" + msg->auth_nonce_ + ":" + msg->auth_nc_ + ":"
             + msg->auth_cnonce_ + ":" + msg->auth_qop_ + ":" + hash2;
