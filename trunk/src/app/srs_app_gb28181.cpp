@@ -718,9 +718,13 @@ srs_error_t SrsGbSipTcpConn::password_verification(SrsSipMessage* msg)
     }
     std::string auth = msg->authorization_;
     SrsUniquePtr<SrsSipMessage> prt(msg->copy());
-    // todo uuid 待完成
     uuid_t uuid;
     uuid_generate(uuid);
+    char out[37];
+    uuid_unparse_lower(uuid, out);
+    std::string uuid_str(out);
+    // remove '-'
+    uuid_str.erase(std::remove(uuid_str.begin(), uuid_str.end(), '-'), uuid_str.end());
     // todo 待优化
     prt->www_authenticate_ = "Digest realm=\"3402000000\",qop=\"auth\",nonce=\"6eb1340d99c404a0e4d3b68d15d1d46f\"";
     // todo 还需要加入配置文件的判断
